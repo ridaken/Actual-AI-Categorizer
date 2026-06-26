@@ -1,0 +1,43 @@
+# actual-ai-categorizer configuration.
+# Copy to config.yaml and edit. Secrets use ${ENV_VAR} interpolation so they are
+# not stored in plaintext here — set those variables in the environment (or a
+# systemd unit / .env loaded by your service manager).
+
+actual:
+  server_url: https://actual.example.com   # your Actual sync server URL
+  password: ${ACTUAL_PASSWORD}             # server password
+  sync_id: "00000000-0000-0000-0000-000000000000"  # budget Sync ID (Settings > Advanced > Sync ID)
+  encryption_password: ${ACTUAL_E2E_PASSWORD}       # only if the budget is end-to-end encrypted; else leave blank/unset
+  data_dir: ./.actual-data                 # local cache the API syncs the budget into
+
+ai:
+  base_url: http://llama-host:8080/v1      # OpenAI-compatible endpoint (llama-server, etc.)
+  api_key: ${AI_API_KEY}                   # often unused for local llama-server; required for cloud providers
+  model: local-model                       # model name the server expects
+  temperature: 0.2
+  request_timeout_s: 60
+  max_retries: 3
+  constrained_output: true                 # force the model to emit only a real category (json_schema + grammar)
+
+categorization:
+  confidence_threshold: 0.6                # below this, leave the transaction uncategorized (retried next run)
+  skip_transfers: true                     # never categorize transfers between accounts
+  skip_splits: true                        # never categorize split-parent rows (children hold the categories)
+  max_transactions: 200                    # cap per run (0 = no cap)
+  months_lookback: 3                       # only consider transactions newer than this many months
+  write_reasoning_to_notes: false          # if true, append the AI's reasoning/confidence to the transaction notes
+
+bank_sync:
+  enabled: false                           # SimpleFIN/GoCardless users: set true to sync before each run
+  account_ids: []                          # specific account ids, or empty for all linked accounts
+
+scheduler:
+  mode: once                               # "once" (use with systemd timer/cron) or "loop"
+  polling_minutes: 30                      # used when mode is "loop" (or via the `loop` subcommand)
+
+logging:
+  level: info                              # debug | info | warn | error
+  audit_file: ./logs/audit.jsonl           # JSONL record of every decision
+
+category_reference_path: ./categories.md   # reference sheet embedded into the system prompt
+dry_run: false                             # true = decide + log but never write to Actual

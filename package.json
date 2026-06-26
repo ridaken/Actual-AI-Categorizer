@@ -1,0 +1,31 @@
+{
+  "name": "actual-ai-categorizer",
+  "version": "0.1.0",
+  "description": "Auto-categorize uncategorized Actual Budget transactions with an OpenAI-compatible AI server (llama.cpp / cloud).",
+  "type": "module",
+  "bin": {
+    "actual-ai-categorizer": "dist/index.js"
+  },
+  "engines": {
+    "node": ">=18.17"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "dev": "tsx src/index.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@actual-app/api": "26.6.0",
+    "yaml": "^2.5.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "tsx": "^4.16.0",
+    "typescript": "^5.5.0",
+    "vitest": "^2.0.0"
+  }
+}

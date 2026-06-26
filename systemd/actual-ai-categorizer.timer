@@ -1,0 +1,13 @@
+# Runs the one-shot service on an interval. Adjust OnUnitActiveSec to taste.
+[Unit]
+Description=Run Actual Budget AI auto-categorizer periodically
+
+[Timer]
+# First run shortly after boot, then every 30 minutes after each completion.
+OnBootSec=5min
+OnUnitActiveSec=30min
+Persistent=true
+Unit=actual-ai-categorizer.service
+
+[Install]
+WantedBy=timers.target

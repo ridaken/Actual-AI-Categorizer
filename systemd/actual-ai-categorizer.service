@@ -1,0 +1,16 @@
+# One-shot run, triggered by the companion .timer.
+# Install to /etc/systemd/system/ (adjust paths/user), then:
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now actual-ai-categorizer.timer
+[Unit]
+Description=Actual Budget AI auto-categorizer (one-shot)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=actual
+WorkingDirectory=/opt/actual-ai-categorizer
+# Secrets referenced as ${VAR} in config.yaml are loaded from this file:
+EnvironmentFile=/etc/actual-ai-categorizer/secrets.env
+ExecStart=/usr/bin/node dist/index.js run --config /etc/actual-ai-categorizer/config.yaml

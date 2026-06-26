@@ -161,19 +161,103 @@ category in Actual is picked up automatically — you only edit this file for nu
 
 ## Deployment on Debian (recommended)
 
-Use the one-shot `run` with a systemd timer (see `systemd/`):
+The tool runs the one-shot `run` command on a schedule. A **systemd timer** is the most
+robust option; a **cron** job is the simplest. Install once, then pick A or B.
+
+### 1. Install (shared by both options)
 
 ```bash
-sudo cp -r . /opt/actual-ai-categorizer && cd /opt/actual-ai-categorizer
+# Clone to a fixed location (a git working tree is also what auto_update needs)
+sudo git clone https://github.com/ridaken/Actual-AI-Categorizer.git /opt/actual-ai-categorizer
+cd /opt/actual-ai-categorizer
+sudo npm ci
+sudo npm run build
+
+# Dedicated service user + a writable state directory
+sudo useradd --system --home /opt/actual-ai-categorizer --shell /usr/sbin/nologin actual || true
+sudo mkdir -p /var/lib/actual-ai-categorizer
+
+# Config, category sheet, and secrets
 sudo mkdir -p /etc/actual-ai-categorizer
-sudo cp config.yaml /etc/actual-ai-categorizer/
-sudo cp systemd/secrets.env.example /etc/actual-ai-categorizer/secrets.env  # edit + chmod 600
-sudo cp systemd/actual-ai-categorizer.{service,timer} /etc/systemd/system/
+sudo cp config.example.yaml     /etc/actual-ai-categorizer/config.yaml
+sudo cp categories.example.md   /etc/actual-ai-categorizer/categories.md
+sudo cp systemd/secrets.env.example /etc/actual-ai-categorizer/secrets.env
+sudo chmod 600 /etc/actual-ai-categorizer/secrets.env
+
+sudo chown -R actual:actual /opt/actual-ai-categorizer /var/lib/actual-ai-categorizer /etc/actual-ai-categorizer
+```
+
+Then edit `/etc/actual-ai-categorizer/config.yaml` and `secrets.env`. Because the run
+happens from a service/cron context, use **absolute paths** in the config:
+
+```yaml
+category_reference_path: /etc/actual-ai-categorizer/categories.md
+logging:
+  audit_file: /var/lib/actual-ai-categorizer/audit.jsonl
+actual:
+  data_dir: /var/lib/actual-ai-categorizer/data
+```
+
+### 2A. Option A — systemd timer (recommended)
+
+The unit files in `systemd/` run `node dist/index.js run` as the `actual` user, loading
+secrets from the env file. Install and enable them:
+
+```bash
+sudo cp systemd/actual-ai-categorizer.service /etc/systemd/system/
+sudo cp systemd/actual-ai-categorizer.timer   /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now actual-ai-categorizer.timer
 ```
 
-On macOS/Windows, prefer `actual-ai-categorizer loop` (or Task Scheduler / launchd).
+Change the cadence by editing `OnUnitActiveSec=` in the timer (e.g. `15min`, `1h`), then:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl restart actual-ai-categorizer.timer
+```
+
+Operate and inspect it:
+
+```bash
+systemctl list-timers actual-ai-categorizer.timer     # next + last run times
+sudo systemctl start actual-ai-categorizer.service    # trigger a run right now
+journalctl -u actual-ai-categorizer.service -f        # follow run logs
+systemctl status actual-ai-categorizer.timer
+```
+
+### 2B. Option B — cron
+
+Cron has no env-file mechanism, so wrap the run in a small launcher that sources the
+secrets first:
+
+```bash
+sudo tee /opt/actual-ai-categorizer/run.sh >/dev/null <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+set -a; source /etc/actual-ai-categorizer/secrets.env; set +a
+cd /opt/actual-ai-categorizer
+exec /usr/bin/node dist/index.js run --config /etc/actual-ai-categorizer/config.yaml
+EOF
+sudo chmod +x /opt/actual-ai-categorizer/run.sh
+```
+
+Install a cron entry that runs it every 30 minutes as the `actual` user:
+
+```bash
+echo '*/30 * * * * actual /opt/actual-ai-categorizer/run.sh >> /var/log/actual-ai-categorizer.log 2>&1' \
+  | sudo tee /etc/cron.d/actual-ai-categorizer >/dev/null
+```
+
+Adjust `*/30` to taste (`*/15` = every 15 min, `0 * * * *` = hourly). Watch it with
+`tail -f /var/log/actual-ai-categorizer.log`. Run it on demand with
+`sudo -u actual /opt/actual-ai-categorizer/run.sh`.
+
+### macOS / Windows
+
+There's no systemd/cron; use the built-in daemon instead — `actual-ai-categorizer loop`
+reads `scheduler.polling_minutes` from the config. Wrap it with launchd (macOS) or Task
+Scheduler / NSSM (Windows) to keep it running across reboots.
 
 ## Testing
 
@@ -200,3 +284,21 @@ against a local mock HTTP server — nothing external is required.
 `@actual-app/api` is pinned in `package.json`. When upgrading your Actual server,
 bump it to a matching release and re-run `npm test`. The startup log records the
 server URL it connected to; keep the API version aligned with your server version.
+
+## Contributing & releases
+
+Changes land via **feature branch → pull request → merge into `main`**, not direct
+commits to `main`. This keeps auto-generated release notes accurate, since each
+release lists the PRs merged since the previous tag.
+
+```bash
+git checkout -b my-change
+# ...edit, then:
+npm run typecheck && npm test
+git push -u origin my-change
+gh pr create --base main --fill
+```
+
+On open, CI runs the gates (`typecheck`, `test`, `build` on Node 18 + 20) against the PR.
+On merge to `main`, the release job auto-increments the patch version, tags it, and
+publishes a GitHub Release with generated notes — see `.github/workflows/ci.yml`.

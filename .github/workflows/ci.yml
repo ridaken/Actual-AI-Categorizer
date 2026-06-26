@@ -1,0 +1,86 @@
+name: CI
+
+# Gates run on every PR and every push to main. A release is cut only when a
+# push to main passes all gates.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Don't let overlapping runs race on the release/tag step. Newer pushes to the
+# same ref supersede in-flight runs (but never cancel a running release midway
+# on main — see cancel-in-progress).
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Verify (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['18.x', '20.x']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+  release:
+    name: Release
+    needs: verify
+    # Only on direct pushes to main (not PRs, not forks).
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create tags and releases
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # need full tag history to compute the next version
+
+      - name: Determine next version
+        id: ver
+        run: |
+          latest=$(git tag -l 'v*.*.*' --sort=-v:refname | head -n1)
+          if [ -z "$latest" ]; then
+            next="v0.1.0"
+          else
+            ver=${latest#v}
+            IFS='.' read -r major minor patch <<< "$ver"
+            next="v${major}.${minor}.$((patch + 1))"
+          fi
+          echo "Next release: $next (previous: ${latest:-none})"
+          echo "next=$next" >> "$GITHUB_OUTPUT"
+
+      - name: Create tag and GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          next="${{ steps.ver.outputs.next }}"
+          git tag "$next"
+          git push origin "$next"
+          gh release create "$next" \
+            --title "$next" \
+            --target "${{ github.sha }}" \
+            --generate-notes

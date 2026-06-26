@@ -29,7 +29,8 @@ for bin in node npm git; do
 done
 
 # 1. Get the code to $APP_DIR (clone fresh, or update an existing checkout).
-script_root="$(cd "$(dirname "${BASH_SOURCE[0]:-}")/.." 2>/dev/null && pwd || true)"
+script_dir="$(dirname "${BASH_SOURCE[0]:-.}")"
+script_root="$(cd "$script_dir/.." 2>/dev/null && pwd)" || script_root=""
 if [ -d "$APP_DIR/.git" ]; then
   log "updating existing checkout at $APP_DIR"
   git -C "$APP_DIR" pull --ff-only

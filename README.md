@@ -99,6 +99,10 @@ git fetch → pick target (latest release tag by default, or a branch)
 
 - **`ref`** — `latest-release` (newest `vX.Y.Z` tag; stable, recommended) or a branch
   name like `main` (bleeding edge).
+- **Signature verification (on by default).** Before applying, the target commit's
+  signature is checked with `git verify-commit`. If it isn't validly signed by a trusted
+  key, the update is **refused** (fail-closed) and the run continues on the current
+  version. Disable with `verify_signature: false` only if you understand the risk.
 - **Fail-safe.** Any problem (offline, non-fast-forward, build error) is logged and the
   run continues on the current version; build failures roll back the checkout.
 - **Skipped** when the working tree has uncommitted local changes, when not run from a
@@ -108,6 +112,45 @@ git fetch → pick target (latest release tag by default, or a branch)
   the tool manages; run `git checkout main` if you want to hack on it locally.
 - Requires the deploy to be a git working tree with network access to the remote
   (the default systemd setup in `systemd/` satisfies this).
+
+#### Setting up signed updates
+
+With `verify_signature: true` (the default), updates only apply if the target commit is
+signed by a key you trust. Set this up once:
+
+**1. Sign your commits** on the machine you author from. SSH signing is simplest:
+
+```bash
+git config --global gpg.format ssh
+git config --global user.signingkey ~/.ssh/id_ed25519.pub
+git config --global commit.gpgsign true
+```
+
+(Or use a GPG key with `git config --global commit.gpgsign true` and a `user.signingkey`
+GPG key id.) Commits you push to `main` are now signed, and each release tag points at a
+signed commit.
+
+**2. Tell the deploy box which keys to trust.** For SSH signing, create an allowed-signers
+file and point the config at it:
+
+```bash
+# /etc/actual-ai-categorizer/allowed_signers
+your-git-email@example.com ssh-ed25519 AAAAC3NzaC1lZDI1...
+```
+
+```yaml
+auto_update:
+  verify_signature: true
+  allowed_signers_file: /etc/actual-ai-categorizer/allowed_signers
+```
+
+For GPG, instead import your public key into the deploy user's keyring
+(`gpg --import pubkey.asc`) and leave `allowed_signers_file` unset — verification falls
+back to the system GPG trust store.
+
+> Note: verification trusts the **commit** signature, not the lightweight release tag that
+> CI creates. If you enable `verify_signature` but your commits aren't signed by a trusted
+> key, updates will be refused — that's the intended fail-closed behavior.
 
 ### The category reference sheet
 

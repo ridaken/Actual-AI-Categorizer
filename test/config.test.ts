@@ -34,6 +34,10 @@ describe('parseConfig', () => {
     expect(cfg.categorization.confidence_threshold).toBe(0.6);
     expect(cfg.scheduler.mode).toBe('once');
     expect(cfg.dry_run).toBe(false);
+    // self-update is off by default, but verification is on (secure by default)
+    expect(cfg.auto_update.enabled).toBe(false);
+    expect(cfg.auto_update.verify_signature).toBe(true);
+    expect(cfg.auto_update.ref).toBe('latest-release');
   });
 
   it('rejects an empty required password', () => {

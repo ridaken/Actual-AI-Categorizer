@@ -49,11 +49,10 @@ const cfg = (over: Partial<SelfUpdateConfig> = {}): SelfUpdateConfig => ({
   installDeps: true,
   build: true,
   restart: true,
+  verifySignature: false,
   repoDir: '/repo',
   ...over,
 });
-
-const REPO = '/repo';
 
 /** Common map for "an update from v0.1.0 (old) to v0.1.1 (new) is available". */
 function updateAvailableMap(opts: { clean?: boolean; lockChanged?: boolean } = {}) {
@@ -176,5 +175,39 @@ describe('performSelfUpdate', () => {
     expect(() => performSelfUpdate(cfg({ ref: 'main' }), d)).toThrow('__REEXEC__');
     expect(calls).toContain('git checkout --quiet main');
     expect(calls).toContain('git merge --ff-only --quiet origin/main');
+  });
+
+  it('applies the update when signature verification passes', () => {
+    const { run, calls } = fakeRun(updateAvailableMap()); // verify-commit unmatched => success
+    const d = deps(run);
+    expect(() => performSelfUpdate(cfg({ verifySignature: true }), d)).toThrow('__REEXEC__');
+    expect(calls).toContain('git verify-commit --raw newsha');
+    expect(calls).toContain('git -c advice.detachedHead=false checkout --quiet v0.1.1');
+    expect(d.reexecCount()).toBe(1);
+  });
+
+  it('refuses the update (fail-closed) when verification fails', () => {
+    const map = updateAvailableMap();
+    map.push(['git verify-commit', new Error('no valid signature')]);
+    const { run, calls } = fakeRun(map);
+    const d = deps(run);
+    performSelfUpdate(cfg({ verifySignature: true }), d);
+    expect(calls.some((c) => c.startsWith('git -c advice') || c.includes('checkout --quiet v0.1.1'))).toBe(false);
+    expect(calls.some((c) => c === 'npm run build')).toBe(false);
+    expect(d.reexecCount()).toBe(0);
+  });
+
+  it('uses the SSH allowed-signers file when configured', () => {
+    const { run, calls } = fakeRun(updateAvailableMap());
+    const d = deps(run);
+    expect(() =>
+      performSelfUpdate(
+        cfg({ verifySignature: true, allowedSignersFile: '/etc/allowed' }),
+        d,
+      ),
+    ).toThrow('__REEXEC__');
+    expect(calls).toContain(
+      'git -c gpg.format=ssh -c gpg.ssh.allowedSignersFile=/etc/allowed verify-commit --raw newsha',
+    );
   });
 });

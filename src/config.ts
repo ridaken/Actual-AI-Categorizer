@@ -73,6 +73,10 @@ const AutoUpdateSchema = z.object({
   install_deps: z.boolean().default(true),
   build: z.boolean().default(true),
   restart: z.boolean().default(true),
+  // Require a valid signature on the target commit before applying (fail-closed).
+  verify_signature: z.boolean().default(true),
+  // Optional SSH allowed-signers file; when set, verification uses SSH format.
+  allowed_signers_file: z.string().optional(),
   // Repo directory; defaults to the install location when omitted.
   repo_dir: z.string().optional(),
 });

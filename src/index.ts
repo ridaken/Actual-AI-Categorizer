@@ -99,6 +99,8 @@ async function main(): Promise<void> {
     installDeps: config.auto_update.install_deps,
     build: config.auto_update.build,
     restart: config.auto_update.restart,
+    verifySignature: config.auto_update.verify_signature,
+    allowedSignersFile: config.auto_update.allowed_signers_file,
     repoDir: resolveRepoDir(config.auto_update.repo_dir),
   };
   if (config.auto_update.enabled && config.dry_run) {

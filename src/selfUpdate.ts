@@ -18,6 +18,10 @@ export interface SelfUpdateConfig {
   build: boolean;
   restart: boolean;
   repoDir: string;
+  /** Require a valid signature on the target commit before applying (fail-closed). */
+  verifySignature: boolean;
+  /** Optional SSH allowed-signers file; when set, verification uses SSH format. */
+  allowedSignersFile?: string;
 }
 
 export interface SelfUpdateDeps {
@@ -76,6 +80,14 @@ export function performSelfUpdate(cfg: SelfUpdateConfig, deps: SelfUpdateDeps): 
       return;
     }
 
+    if (cfg.verifySignature && !verifyCommit(deps, cfg, target.commit)) {
+      logger.error(
+        `self-update: signature verification FAILED for ${target.label} ` +
+          `(${target.commit.slice(0, 8)}); refusing to update`,
+      );
+      return;
+    }
+
     logger.info(`self-update: updating to ${target.label}`);
     target.checkout();
     updated = true;
@@ -121,6 +133,32 @@ function isGitRepo(deps: SelfUpdateDeps): boolean {
 
 function isCleanTree(deps: SelfUpdateDeps): boolean {
   return git(deps, ['status', '--porcelain']) === '';
+}
+
+/**
+ * Verify the target commit carries a valid signature. Uses an SSH allowed-signers
+ * file when configured, otherwise the system git/gpg trust store. Returns false on
+ * any verification failure (missing signature, unknown key, bad signature) so the
+ * caller fails closed.
+ */
+function verifyCommit(deps: SelfUpdateDeps, cfg: SelfUpdateConfig, commit: string): boolean {
+  const args: string[] = [];
+  if (cfg.allowedSignersFile) {
+    args.push(
+      '-c',
+      'gpg.format=ssh',
+      '-c',
+      `gpg.ssh.allowedSignersFile=${cfg.allowedSignersFile}`,
+    );
+  }
+  args.push('verify-commit', '--raw', commit);
+  try {
+    deps.run('git', args);
+    deps.logger.info(`self-update: signature verified for ${commit.slice(0, 8)}`);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function lockfileChanged(deps: SelfUpdateDeps, from: string, to: string): boolean {

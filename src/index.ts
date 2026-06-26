@@ -6,6 +6,14 @@ import { connectActual } from './actual/client.js';
 import { AiProvider } from './ai/provider.js';
 import { runOnce } from './pipeline.js';
 import { runLoop, type LoopController } from './scheduler.js';
+import {
+  performSelfUpdate,
+  defaultRun,
+  defaultReexec,
+  resolveRepoDir,
+  type SelfUpdateConfig,
+  type SelfUpdateDeps,
+} from './selfUpdate.js';
 
 interface Cli {
   command: 'run' | 'loop';
@@ -84,37 +92,55 @@ async function main(): Promise<void> {
     constrainedOutput: config.ai.constrained_output,
   });
 
-  logger.info(`connecting to Actual at ${config.actual.server_url}`);
-  const session = await connectActual({
-    serverUrl: config.actual.server_url,
-    password: config.actual.password,
-    syncId: config.actual.sync_id,
-    encryptionPassword: config.actual.encryption_password || undefined,
-    dataDir: config.actual.data_dir,
-  });
+  const selfUpdateCfg: SelfUpdateConfig = {
+    // Skip self-update during a dry run so --dry-run has no side effects.
+    enabled: config.auto_update.enabled && !config.dry_run,
+    ref: config.auto_update.ref,
+    installDeps: config.auto_update.install_deps,
+    build: config.auto_update.build,
+    restart: config.auto_update.restart,
+    repoDir: resolveRepoDir(config.auto_update.repo_dir),
+  };
+  if (config.auto_update.enabled && config.dry_run) {
+    logger.info('self-update skipped in dry-run mode');
+  }
+  const selfUpdateDeps: SelfUpdateDeps = {
+    run: defaultRun(selfUpdateCfg.repoDir),
+    reexec: () => defaultReexec(process.env),
+    env: process.env,
+    logger,
+  };
 
-  const deps = { api: session, provider, config, referenceSheet, logger, audit };
-
-  try {
-    if (cli.command === 'loop') {
-      const controller: LoopController = { stopped: false };
-      const stop = () => {
-        logger.info('shutdown requested; finishing current cycle...');
-        controller.stopped = true;
-      };
-      process.on('SIGINT', stop);
-      process.on('SIGTERM', stop);
-      await runLoop(
-        () => runOnce(deps).then(() => undefined),
-        config.scheduler.polling_minutes,
-        logger,
-        controller,
-      );
-    } else {
-      await runOnce(deps);
+  // One categorization cycle: check for updates first (may re-exec into the new
+  // version and not return), then connect, run, and release the budget session.
+  const cycle = async (): Promise<void> => {
+    performSelfUpdate(selfUpdateCfg, selfUpdateDeps);
+    logger.info(`connecting to Actual at ${config.actual.server_url}`);
+    const session = await connectActual({
+      serverUrl: config.actual.server_url,
+      password: config.actual.password,
+      syncId: config.actual.sync_id,
+      encryptionPassword: config.actual.encryption_password || undefined,
+      dataDir: config.actual.data_dir,
+    });
+    try {
+      await runOnce({ api: session, provider, config, referenceSheet, logger, audit });
+    } finally {
+      await session.shutdown();
     }
-  } finally {
-    await session.shutdown();
+  };
+
+  if (cli.command === 'loop') {
+    const controller: LoopController = { stopped: false };
+    const stop = () => {
+      logger.info('shutdown requested; finishing current cycle...');
+      controller.stopped = true;
+    };
+    process.on('SIGINT', stop);
+    process.on('SIGTERM', stop);
+    await runLoop(cycle, config.scheduler.polling_minutes, logger, controller);
+  } else {
+    await cycle();
   }
 }
 

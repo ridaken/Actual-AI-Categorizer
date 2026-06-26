@@ -84,6 +84,30 @@ See `config.example.yaml` for the fully-commented template. Highlights:
 | `bank_sync.enabled` | Trigger SimpleFIN/GoCardless sync before each run. Leave `false` if you don't use bank sync. |
 | `ai.constrained_output` | Force valid-category output via json_schema + grammar. Recommended. |
 | `scheduler.mode` / `polling_minutes` | `once` (with a timer) or `loop`. |
+| `auto_update.enabled` | Self-update from git at the start of each run (see below). |
+
+### Self-update
+
+With `auto_update.enabled: true`, each run first checks the git remote and, if a
+newer version exists, updates and re-runs on it:
+
+```
+git fetch → pick target (latest release tag by default, or a branch)
+   → if newer & working tree clean: checkout → npm ci (if lockfile changed)
+   → npm run build → re-exec into the new version (so this run uses it)
+```
+
+- **`ref`** — `latest-release` (newest `vX.Y.Z` tag; stable, recommended) or a branch
+  name like `main` (bleeding edge).
+- **Fail-safe.** Any problem (offline, non-fast-forward, build error) is logged and the
+  run continues on the current version; build failures roll back the checkout.
+- **Skipped** when the working tree has uncommitted local changes, when not run from a
+  git clone, and during `--dry-run`.
+- In `loop` mode the check runs each cycle, so a long-running daemon picks up releases
+  without a manual restart. It tracks tags via a **detached HEAD** — fine for a deploy
+  the tool manages; run `git checkout main` if you want to hack on it locally.
+- Requires the deploy to be a git working tree with network access to the remote
+  (the default systemd setup in `systemd/` satisfies this).
 
 ### The category reference sheet
 

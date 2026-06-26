@@ -39,5 +39,13 @@ logging:
   level: info                              # debug | info | warn | error
   audit_file: ./logs/audit.jsonl           # JSONL record of every decision
 
+auto_update:
+  enabled: false                           # check for + apply a newer version at the start of each run
+  ref: latest-release                      # "latest-release" (newest vX.Y.Z tag) or a branch name (e.g. main)
+  install_deps: true                       # run `npm ci` when package-lock.json changed
+  build: true                              # run `npm run build` after updating (required for compiled deploys)
+  restart: true                            # re-exec into the new version so this run uses it
+  # repo_dir: /opt/actual-ai-categorizer   # defaults to the install directory; set if running from elsewhere
+
 category_reference_path: ./categories.md   # reference sheet embedded into the system prompt
 dry_run: false                             # true = decide + log but never write to Actual

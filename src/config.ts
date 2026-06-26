@@ -66,6 +66,17 @@ const LoggingSchema = z.object({
   audit_file: z.string().default('./logs/audit.jsonl'),
 });
 
+const AutoUpdateSchema = z.object({
+  enabled: z.boolean().default(false),
+  // 'latest-release' = newest v*.*.* tag; otherwise a branch name to track.
+  ref: z.string().default('latest-release'),
+  install_deps: z.boolean().default(true),
+  build: z.boolean().default(true),
+  restart: z.boolean().default(true),
+  // Repo directory; defaults to the install location when omitted.
+  repo_dir: z.string().optional(),
+});
+
 export const ConfigSchema = z.object({
   actual: ActualSchema,
   ai: AiSchema,
@@ -73,6 +84,7 @@ export const ConfigSchema = z.object({
   bank_sync: BankSyncSchema.default({}),
   scheduler: SchedulerSchema.default({}),
   logging: LoggingSchema.default({}),
+  auto_update: AutoUpdateSchema.default({}),
   category_reference_path: z.string().default('./categories.md'),
   dry_run: z.boolean().default(false),
 });

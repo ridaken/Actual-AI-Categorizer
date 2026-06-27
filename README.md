@@ -38,12 +38,14 @@ bank sync (optional) → load categories/payees → find uncategorized rows
 
 ## Setup
 
+For a Debian server, skip to [one-command install](#deployment-on-debian-recommended).
+To run it manually anywhere:
+
 ```bash
 npm install
 npm run build
 
-cp config.example.yaml config.yaml
-cp categories.example.md categories.md
+node dist/index.js init      # scaffolds config.yaml + categories.md (won't overwrite)
 # edit both to taste
 ```
 
@@ -161,102 +163,71 @@ category in Actual is picked up automatically — you only edit this file for nu
 
 ## Deployment on Debian (recommended)
 
-The tool runs the one-shot `run` command on a schedule. A **systemd timer** is the most
-robust option; a **cron** job is the simplest. Install once, then pick A or B.
-
-### 1. Install (shared by both options)
+One command installs everything — clones the repo, builds it, creates a dedicated
+`actual` service user, scaffolds the config, and enables a systemd timer:
 
 ```bash
-# Clone to a fixed location (a git working tree is also what auto_update needs)
-sudo git clone https://github.com/ridaken/Actual-AI-Categorizer.git /opt/actual-ai-categorizer
-cd /opt/actual-ai-categorizer
-sudo npm ci
-sudo npm run build
-
-# Dedicated service user + a writable state directory
-sudo useradd --system --home /opt/actual-ai-categorizer --shell /usr/sbin/nologin actual || true
-sudo mkdir -p /var/lib/actual-ai-categorizer
-
-# Config, category sheet, and secrets
-sudo mkdir -p /etc/actual-ai-categorizer
-sudo cp config.example.yaml     /etc/actual-ai-categorizer/config.yaml
-sudo cp categories.example.md   /etc/actual-ai-categorizer/categories.md
-sudo cp systemd/secrets.env.example /etc/actual-ai-categorizer/secrets.env
-sudo chmod 600 /etc/actual-ai-categorizer/secrets.env
-
-sudo chown -R actual:actual /opt/actual-ai-categorizer /var/lib/actual-ai-categorizer /etc/actual-ai-categorizer
+curl -fsSL https://raw.githubusercontent.com/ridaken/Actual-AI-Categorizer/main/scripts/install.sh | sudo bash
 ```
 
-Then edit `/etc/actual-ai-categorizer/config.yaml` and `secrets.env`. Because the run
-happens from a service/cron context, use **absolute paths** in the config:
+(or, from a checkout: `sudo ./scripts/install.sh`). It's **idempotent** — re-run it any
+time to update an existing install. Requires `node` (18+), `npm`, and `git` on PATH.
 
-```yaml
-category_reference_path: /etc/actual-ai-categorizer/categories.md
-logging:
-  audit_file: /var/lib/actual-ai-categorizer/audit.jsonl
-actual:
-  data_dir: /var/lib/actual-ai-categorizer/data
-```
-
-### 2A. Option A — systemd timer (recommended)
-
-The unit files in `systemd/` run `node dist/index.js run` as the `actual` user, loading
-secrets from the env file. Install and enable them:
+Then edit the two files it created and you're done:
 
 ```bash
-sudo cp systemd/actual-ai-categorizer.service /etc/systemd/system/
-sudo cp systemd/actual-ai-categorizer.timer   /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now actual-ai-categorizer.timer
+sudo -e /opt/actual-ai-categorizer/config.yaml   # actual.server_url, sync_id, ai.base_url, ai.model
+sudo -e /opt/actual-ai-categorizer/secrets.env   # ACTUAL_PASSWORD (+ optional E2E / AI keys)
+
+sudo systemctl start actual-ai-categorizer.service        # run once now
+journalctl -u actual-ai-categorizer.service -f            # follow logs
+systemctl list-timers actual-ai-categorizer.timer         # when it next runs
 ```
 
-Change the cadence by editing `OnUnitActiveSec=` in the timer (e.g. `15min`, `1h`), then:
+Everything lives under `/opt/actual-ai-categorizer` (code, config, secrets, logs, data),
+owned by the `actual` user. Override defaults via env vars, e.g. a 15-minute cadence into
+a custom directory:
 
 ```bash
-sudo systemctl daemon-reload
-sudo systemctl restart actual-ai-categorizer.timer
+sudo INTERVAL=15min APP_DIR=/srv/aac ./scripts/install.sh
 ```
 
-Operate and inspect it:
+**Changing the cadence later:** edit `OnUnitActiveSec=` in
+`/etc/systemd/system/actual-ai-categorizer.timer` (e.g. `15min`, `1h`), then
+`sudo systemctl daemon-reload && sudo systemctl restart actual-ai-categorizer.timer`.
+Or just re-run the installer with `INTERVAL=...`.
 
-```bash
-systemctl list-timers actual-ai-categorizer.timer     # next + last run times
-sudo systemctl start actual-ai-categorizer.service    # trigger a run right now
-journalctl -u actual-ai-categorizer.service -f        # follow run logs
-systemctl status actual-ai-categorizer.timer
-```
+<details>
+<summary>Prefer cron, or want to do it by hand?</summary>
 
-### 2B. Option B — cron
-
-Cron has no env-file mechanism, so wrap the run in a small launcher that sources the
-secrets first:
+The installer just automates these steps. After `install.sh` (or a manual
+`git clone` + `npm ci && npm run build` + `node dist/index.js init`), you can schedule it
+with cron instead of the timer. Cron has no env-file mechanism, so wrap the run in a
+launcher that loads the secrets first:
 
 ```bash
 sudo tee /opt/actual-ai-categorizer/run.sh >/dev/null <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
-set -a; source /etc/actual-ai-categorizer/secrets.env; set +a
+set -a; source /opt/actual-ai-categorizer/secrets.env; set +a
 cd /opt/actual-ai-categorizer
-exec /usr/bin/node dist/index.js run --config /etc/actual-ai-categorizer/config.yaml
+exec /usr/bin/node dist/index.js run --config config.yaml
 EOF
 sudo chmod +x /opt/actual-ai-categorizer/run.sh
-```
 
-Install a cron entry that runs it every 30 minutes as the `actual` user:
-
-```bash
 echo '*/30 * * * * actual /opt/actual-ai-categorizer/run.sh >> /var/log/actual-ai-categorizer.log 2>&1' \
   | sudo tee /etc/cron.d/actual-ai-categorizer >/dev/null
 ```
 
-Adjust `*/30` to taste (`*/15` = every 15 min, `0 * * * *` = hourly). Watch it with
-`tail -f /var/log/actual-ai-categorizer.log`. Run it on demand with
-`sudo -u actual /opt/actual-ai-categorizer/run.sh`.
+Adjust `*/30` to taste (`*/15` = every 15 min, `0 * * * *` = hourly).
+
+</details>
 
 ### macOS / Windows
 
-There's no systemd/cron; use the built-in daemon instead — `actual-ai-categorizer loop`
-reads `scheduler.polling_minutes` from the config. Wrap it with launchd (macOS) or Task
+There's no systemd/cron; use the built-in daemon instead. After `npm install && npm run
+build && node dist/index.js init`, run `actual-ai-categorizer loop` (it reads
+`scheduler.polling_minutes` from the config). Wrap it with launchd (macOS) or Task
 Scheduler / NSSM (Windows) to keep it running across reboots.
 
 ## Testing

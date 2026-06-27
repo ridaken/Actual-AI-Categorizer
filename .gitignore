@@ -5,3 +5,9 @@ logs/
 *.local.yaml
 .env
 coverage/
+
+# Local deployment files (live alongside the code in single-dir installs).
+# Ignored so a self-update's clean-tree check isn't tripped by them.
+/config.yaml
+/categories.md
+/secrets.env

@@ -6,6 +6,8 @@ import { connectActual } from './actual/client.js';
 import { AiProvider } from './ai/provider.js';
 import { runOnce } from './pipeline.js';
 import { runLoop, type LoopController } from './scheduler.js';
+import { parseArgs, HELP } from './cli.js';
+import { runInit } from './init.js';
 import {
   performSelfUpdate,
   defaultRun,
@@ -14,49 +16,6 @@ import {
   type SelfUpdateConfig,
   type SelfUpdateDeps,
 } from './selfUpdate.js';
-
-interface Cli {
-  command: 'run' | 'loop';
-  configPath: string;
-  dryRun: boolean;
-}
-
-function parseArgs(argv: string[]): Cli {
-  const args = argv.slice(2);
-  let command: 'run' | 'loop' | undefined;
-  let configPath = './config.yaml';
-  let dryRun = false;
-
-  for (let i = 0; i < args.length; i++) {
-    const a = args[i];
-    if (a === 'run' || a === 'loop') command = a;
-    else if (a === '--config' || a === '-c') configPath = args[++i];
-    else if (a === '--dry-run') dryRun = true;
-    else if (a === '--help' || a === '-h') {
-      printHelp();
-      process.exit(0);
-    } else throw new Error(`unknown argument: ${a}`);
-  }
-  return { command: command ?? 'run', configPath, dryRun };
-}
-
-function printHelp(): void {
-  process.stdout.write(
-    [
-      'actual-ai-categorizer — AI auto-categorization for Actual Budget',
-      '',
-      'Usage:',
-      '  actual-ai-categorizer run  [--config <path>] [--dry-run]   Run one cycle and exit',
-      '  actual-ai-categorizer loop [--config <path>] [--dry-run]   Run on the configured interval',
-      '',
-      'Defaults: --config ./config.yaml',
-      '',
-      'Secrets (passwords, API keys) are read from environment variables referenced',
-      'as ${VAR} in the config file.',
-      '',
-    ].join('\n'),
-  );
-}
 
 function readReferenceSheet(path: string): string {
   try {
@@ -68,6 +27,19 @@ function readReferenceSheet(path: string): string {
 
 async function main(): Promise<void> {
   const cli = parseArgs(process.argv);
+  if (cli === 'help') {
+    process.stdout.write(HELP);
+    return;
+  }
+
+  if (cli.command === 'init') {
+    runInit(
+      { templateDir: resolveRepoDir(), targetDir: cli.initDir, force: cli.force },
+      createLogger('info'),
+    );
+    return;
+  }
+
   const config: Config = loadConfig(cli.configPath);
   if (cli.dryRun) config.dry_run = true;
 
